@@ -13,16 +13,6 @@
 -define(gravity_acc, -0.0245).    % unit: m/tick^2
 -define(life_length, 300).      % unit: seconds
 
-
-floor(X) when X < 0 ->
-    T = trunc(X),
-    case X - T == 0 of
-        true -> T;
-        false -> T - 1
-    end;
-floor(X) ->
-    trunc(X).
-
 spawn({X, Y, Z}, {_VX, _VY, _VZ}=InitialVelocity, {_ItemId, _Count, _Metadata}=Data) ->
     new(#entity{type=dropped_item, location={X,Y,Z,0,0}, item_id=Data}, InitialVelocity).
 

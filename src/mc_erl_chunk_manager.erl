@@ -32,15 +32,6 @@ coord_to_chunk({X, _Y, Z}) ->
 coord_within_chunk({X, Y, Z}) ->
     {X - floor(X/16)*16, Y - floor(Y/16)*16, Z - floor(Z/16)*16}.
 
-floor(X) when X < 0 ->
-    T = trunc(X),
-    case X - T == 0 of
-        true -> T;
-        false -> T - 1
-    end;
-floor(X) ->
-    trunc(X).
-
 undirectional_block_coord({X, Y, Z, Direction}) ->
     case Direction of
         0 -> {X, Y-1, Z};

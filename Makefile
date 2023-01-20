@@ -1,100 +1,45 @@
-# Copyright 2012 Erlware, LLC. All Rights Reserved.
-#
-# This file is provided to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file
-# except in compliance with the License.  You may obtain
-# a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-#
+PROJECT = mc_erl
 
-ERLFLAGS= -pa $(CURDIR)/.eunit -pa $(CURDIR)/ebin -pa $(CURDIR)/deps/*/ebin
+DEPS += lager
+DEPS += cutkey
+DEPS += cheatcraft
 
-DEPS_PLT=$(CURDIR)/.deps_plt
-DEPS=erts kernel stdlib crypto mnesia public_key
+LOCAL_DEPS += mnesia
 
-# =============================================================================
-# Verify that the programs we need to run are installed on this system
-# =============================================================================
-ERL = $(shell which erl)
+dep_lager = git https://github.com/erlang-lager/lager.git master
+dep_cutkey = git git://github.com/brverbur/cutkey.git 599eb463cd5f6f024e182d4bca11f4189d0cf6c9
+dep_cheatcraft = git git://github.com/lordnull/CheatCraft.git 4d6dcf881218abce0c69cf07b184127c6a1dfd7e
 
-ifeq ($(ERL),)
-$(error "Erlang not available on this system")
-endif
+ERLC_OPTS += +debug_info +'{parse_transform, lager_transform}'
 
-REBAR=$(shell which rebar)
+include erlang.mk
 
-ifeq ($(REBAR),)
-$(error "Rebar not available on this system")
-endif
+SHELL_OPTS += -config apps.config
+SHELL_OPTS += -eval 'application:ensure_all_started(mc_erl)'
 
-.PHONY: all compile doc clean test dialyzer typer shell distclean pdf \
-  update-deps clean-common-test-data rebuild
+define copy_function.erl
+	{ok, Bin} = file:read_file("$(2)"),
+	[_, Match, _] = re:split(Bin, "($(1)(?:.*)\s*->.*\n(?:.*,\n)*.*\.\n)"),
+	{ok, Tokens, _} = erl_scan:string(binary_to_list(Match)),
+	{ok, FunAST} = erl_parse:parse(Tokens),
+	FunArity = length(element(3, _Clause = hd(element(5, FunAST)))),
+	{ok, Replace} = file:read_file("$(3)"),
+	{Start, Length} = binary:match(Replace, <<"-export">>),
+	<<Left:Start/binary, Right/binary>> = Replace,
+	StitchedData0 = [Left, "\n-export([$(1)", "/", integer_to_list(FunArity), "]).\n", Right],
+	StitchedData1 = [StitchedData0, "\n", Match],
+	file:write_file("$(3)", StitchedData1),
+	halt().
+endef
 
-all: deps compile dialyzer test
+autopatch-cutkey::
+	sed '22s|erl_interface\.h|ei.h|g' -i $(DEPS_DIR)/cutkey/c_src/cutkey.c
+	sed 's|rsa->\([a-z0-9]*\),|RSA_get0_\1(rsa),|g' -i $(DEPS_DIR)/cutkey/c_src/cutkey.c
+	sed 's|\([a-z0-9A-Z_\.]*\)\s*==\s*ERL_TUPLE|(\1 == ERL_SMALL_TUPLE_EXT \|\| \1 == ERL_LARGE_TUPLE_EXT)|g' -i $(DEPS_DIR)/cutkey/c_src/cutkey.c
+	$(MAKE) -f $(CURDIR)/erlang.mk -C $(DEPS_DIR)/cutkey new t=module n=crypto_helper
+	$(call erlang,$(call copy_function.erl,erlint,/usr/local/erl_rel/25.2/lib/crypto-5.1.2/src/crypto.erl,$(DEPS_DIR)/cutkey/src/crypto_helper.erl))
+	sed 's|crypto:erlint|crypto_helper:erlint|g' -i $(DEPS_DIR)/cutkey/src/cutkey.erl
+		
 
-# =============================================================================
-# Rules to build the system
-# =============================================================================
-
-deps:
-	$(REBAR) get-deps
-	$(REBAR) compile
-
-update-deps:
-	$(REBAR) update-deps
-	$(REBAR) compile
-
-compile:
-	$(REBAR) skip_deps=true compile
-
-doc:
-	$(REBAR) skip_deps=true doc
-
-eunit: compile clean-common-test-data
-	$(REBAR) skip_deps=true eunit
-
-test: compile eunit
-
-$(DEPS_PLT):
-	@echo Building local plt at $(DEPS_PLT)
-	@echo
-	dialyzer --output_plt $(DEPS_PLT) --build_plt \
-	   --apps $(DEPS) -r deps
-
-dialyzer: $(DEPS_PLT)
-	dialyzer --fullpath --plt $(DEPS_PLT) -Wrace_conditions -r ./ebin
-
-typer:
-	typer --plt $(DEPS_PLT) -r ./src
-
-shell: deps compile
-# You often want *rebuilt* rebar tests to be available to the
-# shell you have to call eunit (to get the tests
-# rebuilt). However, eunit runs the tests, which probably
-# fails (thats probably why You want them in the shell). This
-# runs eunit but tells make to ignore the result.
-	- @$(REBAR) skip_deps=true eunit
-	@$(ERL) $(ERLFLAGS)
-
-pdf:
-	pandoc README.md -o README.pdf
-
-clean:
-	- rm -rf $(CURDIR)/test/*.beam
-	- rm -rf $(CURDIR)/logs
-	- rm -rf $(CURDIR)/ebin
-	$(REBAR) skip_deps=true clean
-
-distclean: clean
-	- rm -rf $(DEPS_PLT)
-	- rm -rvf $(CURDIR)/deps
-
-rebuild: distclean deps compile escript dialyzer test
+autopatch-cheatcraft::
+	sed 's|{mod,{cheatcraft,\[\]}},||g' -i $(DEPS_DIR)/cheatcraft/src/cheatcraft.app.src

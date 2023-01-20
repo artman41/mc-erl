@@ -157,7 +157,6 @@ handle_cast(Req, State) ->
                                {NewInv, _Rest} = mc_erl_inventory:inventory_add(Writer, MyPlayer#player.inventory, #slot{id=BlockId, count=1, metadata=Metadata}),
                                State#state{player=State#state.player#player{inventory=NewInv}}
                        end;
-
                    {packet, {player_block_placement, [-1, 255, -1, -1, #slot{}, _, _, _]}} ->
                        % handle right click when no block selected
                        % handle held item state update (eating food etc.) TODO: recheck this
