@@ -1,34 +1,41 @@
-%% @copyright 2012-2013 Gregory Fefelov, Feiko Nanninga
-
 -module(mc_erl_app).
--export([setup/0, start/2, stop/1, os_setup/0, os_run/0]).
+-behaviour(application).
 
-%% initial server setup, needs to be done only once
-setup() ->
-    mc_erl_chunk_manager:setup().
+-include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
-ensure_started(App) ->
-    case application:start(App) of
-        ok -> ok;
-        {error, {already_started, App}} -> ok
-    end.
+-export([start/2]).
+-export([stop/1]).
 
-start(_StartType, _StartArgs) ->
-    mc_erl_server_sup:start_link().
+start(_Type, _Args) ->
+	server_properties:module_info(),
+	ensure_mnesia_schema(),
+	{PrivateKey, PublicKey} = generate_crypto(),
+	application:set_env(application:get_application(), crypto_private_rsa, PrivateKey),
+	application:set_env(application:get_application(), crypto_public_rsa, PublicKey),
+    case mc_erl_sup:start_link() of
+		Ok = {ok, _} ->
+			world_sup:start_child("world"),
+			Ok;
+		Err ->
+			Err
+	end.
 
-stop(_State) -> mc_erl_server_sup:shutdown().
+stop(_State) ->
+    ok.
 
-%% to be called from OS' command line
-os_setup() ->
-    ok = mnesia:create_schema([node()]),
-    mnesia:start(),
-    {atomic, ok} = setup(),
-    mnesia:stop(),
-    halt().
+generate_crypto() ->
+    {ok, PrivateKey} = cutkey:rsa(1024, 65537, [{return, key}]),
+    #'RSAPrivateKey'{modulus=Modulus, publicExponent=PublicExponent} = PrivateKey,
+    {'SubjectPublicKeyInfo', PublicKey, not_encrypted} = public_key:pem_entry_encode('SubjectPublicKeyInfo', #'RSAPublicKey'{modulus=Modulus, publicExponent=PublicExponent}),
+	{PrivateKey, PublicKey}.
 
-%% to be called from OS' command line
-os_run() ->
-    lager:start(),
-    ensure_started(mnesia),
-    ensure_started(cutkey),
-    ok = application:start(mc_erl).
+ensure_mnesia_schema() ->
+	case lists:keyfind(storage_type, 1, mnesia_schema:get_table_properties(schema)) of
+		{storage_type, disc_copies} ->
+			ok;
+		_ ->
+			application:stop(mnesia),
+			mnesia:create_schema([node()]),
+			application:start(mnesia),
+			ok
+	end.
