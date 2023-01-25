@@ -19,11 +19,11 @@
 ]).
 
 array(<<Packet0/binary>>, LenType, binary) ->
-    {ok, {Length, Packet1}} = LenType(Packet0),
+    {ok, {Length, Packet1}} = ?MODULE:LenType(Packet0),
     <<Bin:Length/binary, Tail/binary>> = Packet1,
     {ok, {Bin, Tail}};
 array(<<Packet0/binary>>, LenType, Type) ->
-    {ok, {Length, Packet1}} = LenType(Packet0),
+    {ok, {Length, Packet1}} = ?MODULE:LenType(Packet0),
     array_(Packet1, Length, Type, []).
 
 uint8(<<I:8/unsigned, Tail/binary>>) ->

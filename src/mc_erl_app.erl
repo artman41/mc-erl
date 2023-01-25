@@ -10,8 +10,9 @@ start(_Type, _Args) ->
 	server_properties:module_info(),
 	ensure_mnesia_schema(),
 	{PrivateKey, PublicKey} = generate_crypto(),
-	application:set_env(application:get_application(), crypto_private_rsa, PrivateKey),
-	application:set_env(application:get_application(), crypto_public_rsa, PublicKey),
+	{ok, App} = application:get_application(),
+	application:set_env(App, crypto_private_rsa, PrivateKey),
+	application:set_env(App, crypto_public_rsa, PublicKey),
     case mc_erl_sup:start_link() of
 		Ok = {ok, _} ->
 			world_sup:start_child("world"),

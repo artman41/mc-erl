@@ -1,6 +1,7 @@
 -module(packets).
 
 -include("packets.hrl").
+-include("encryption.hrl").
 
 -export([decode/1, encode/2]).
 
@@ -16,16 +17,17 @@ decode(<<Id:8, Tail/binary>>) ->
 encode(Type, Args) ->
     case lists:keyfind(Type, 2, packets()) of
         {PacketId, Type, PacketFieldSpec} ->
-            Bin = list_to_binary([
-                <<PacketId:8>>, 
-                [packet_encoder:FieldType(maps:get(FieldName, Args)) || {FieldName, FieldType} <- PacketFieldSpec]
-            ]),
-            {ok, Bin};
+            case encode_(PacketFieldSpec, Args, []) of
+                {ok, Encoded} ->
+                    {ok, list_to_binary([<<PacketId:8>>, Encoded])};
+                Err = {error, _} ->
+                    Err
+            end;
         false ->
             {error, {unknown_packet_type, Type}}
     end.
 
-encrypt() ->
+encrypt(#encryption{}, Msg) ->
     % {Encr, NewIVec} = mc_erl_protocol:encrypt(Socket, Key, IVec, Encoded),
     ok.
 
@@ -43,7 +45,7 @@ packets() ->
     [
         {0, keep_alive, [{unknown_1, int32}]},
         {1, login_request, [{unknown_1, int32}, {unknown_2, string}, {unknown_3, int8}, {unknown_4, int8}, {unknown_5, int8}, {unknown_6, uint8}, {unknown_7, uint8}]},
-        {2, handshake, [{unknown_1, int8}, {username, string}, {server_host, string}, {server_port, int32}]},
+        {2, handshake, [{version, int8}, {username, string}, {server_host, string}, {server_port, int32}]},
         {3, chat_message, [{unknown_1, string}]},
         {4, time_update, [{unknown_1, int64}, {unknown_2, int64}]},
         {5, entity_equipment, [{unknown_1, int32}, {unknown_2, int16}, {unknown_3, slot}]},
@@ -100,7 +102,7 @@ packets() ->
         {107, creative_inventory_action, [{unknown_1, int16}, {unknown_2, slot}]},
         {108, enchant_item, [{unknown_1, int8}, {unknown_2, int8}]},
         {130, update_sign, [{unknown_1, int32}, {unknown_2, int16}, {unknown_3, int32}, {unknown_4, string}, {unknown_5, string}, {unknown_6, string}, {unknown_7, string}]},
-        {131, item_data, [{unknown_1, int16}, {unknown_2, int16}, {unknown_3, {{array, int16, binary}}}]},
+        {131, item_data, [{unknown_1, int16}, {unknown_2, int16}, {unknown_3, {array, int16, binary}}]},
         {132, update_tile_entity, [{unknown_1, int32}, {unknown_2, int16}, {unknown_3, int32}, {unknown_4, int8}, {unknown_5, int16}]},
         {200, increment_statistic, [{unknown_1, int32}, {unknown_2, int8}]},
         {201, player_list_item, [{unknown_1, string}, {unknown_2, bool}, {unknown_3, int16}]},
@@ -108,9 +110,9 @@ packets() ->
         {203, tab_complete, [{unknown_1, string}]},
         {204, client_settings, [{unknown_1, string}, {unknown_2, int8}, {unknown_3, int8}, {unknown_4, int8}, {unknown_5, bool}]},
         {205, client_statuses, [{unknown_1, int8}]},
-        {250, plugin_message, [{unknown_1, string}, {unknown_2, {{array, int16, int8}}}]},
-        {252, encryption_key_response, [{unknown_1, {{array, int16, binary}}}, {unknown_2, {{array, int16, binary}}}]},
-        {253, encryption_key_request, [{unknown_1, string}, {unknown_2, {{array, int16, binary}}}, {unknown_3, {{array, int16, binary}}}]},
+        {250, plugin_message, [{unknown_1, string}, {unknown_2, {array, int16, int8}}]},
+        {252, encryption_key_response, [{encrypted_sym_key, {array, int16, binary}}, {encrypted_token, {array, int16, binary}}]},
+        {253, encryption_key_request, [{unknown_1, string}, {public_key, {array, int16, binary}}, {token, {array, int16, binary}}]},
         {254, server_list_ping, [{unknown_1, int8}]},
         {255, disconnect, [{reason, string}]}
     ].
@@ -131,3 +133,44 @@ decode_(_Packet, [], Rec) ->
       catch error:undef ->
           {error, {unknown_type, Type}}
       end.
+
+encode_([], _Args, Acc) ->
+    {ok, lists:reverse(Acc)};
+encode_([{Name, {array, LenType, DataType}}|Tail], Args, Acc) ->
+    Value = maps:get(Name, Args),
+    Length =
+        try iolist_size(Value) of
+            IOSize -> IOSize
+        catch error:badarg ->
+            length(Value)
+        end,
+    Ret = 
+        try
+            {ok, [
+                packet_encoder:LenType(Length),
+                case DataType of
+                    binary ->
+                        Value;
+                    _ ->
+                        packet_encoder:DataType(Value)
+                end
+            ]}
+        catch error:undef:S ->
+            {_, BadType, _, _} = hd(S),
+            {error, {unknown_type, BadType}}
+        end,
+    case Ret of
+        {ok, Data} ->
+            encode_(Tail, Args, [Data | Acc]);
+        {error, _} ->
+            Ret
+    end;
+encode_([{Name,Type}|Tail], Args, Acc) ->
+    Value = maps:get(Name, Args),
+    lager:debug("Type is ~p~n", [Type]),
+    try packet_encoder:Type(Value) of
+        EncodedValue ->
+            encode_(Tail, Args, [EncodedValue|Acc])
+    catch error:undef ->
+        {error, {unknown_type, Type}}
+    end.
