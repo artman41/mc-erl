@@ -3,6 +3,8 @@ PROJECT = mc_erl
 DEPS += lager
 DEPS += cutkey
 DEPS += cheatcraft
+DEPS += jsx
+DEPS += ranch
 
 LOCAL_DEPS += mnesia
 
@@ -13,8 +15,11 @@ dep_cheatcraft = git git://github.com/lordnull/CheatCraft.git 4d6dcf881218abce0c
 ERLC_OPTS += +debug_info +'{parse_transform, lager_transform}'
 
 include erlang.mk
+include templates.mk
 
-SHELL_OPTS += -config apps.config
+SHELL_OPTS += -config config/sys.config
+SHELL_OPTS += -sname $(PROJECT)
+SHELL_OPTS += -eval 'observer:start()'
 SHELL_OPTS += -eval 'application:ensure_all_started(mc_erl)'
 
 define copy_function.erl

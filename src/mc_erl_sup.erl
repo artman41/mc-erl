@@ -24,6 +24,13 @@ init([]) ->
             type => worker
         },
         #{
+            id => registry_srv,
+            start => {registry_srv, start_link, []},
+            restart => permanent,
+            shutdown => 2000,
+            type => worker
+        },
+        #{
             id => chunk_manager_sup,
             start => {chunk_manager_sup, start_link, []},
             restart => permanent,
@@ -43,6 +50,13 @@ init([]) ->
             restart => permanent,
             shutdown => 2000,
             type => supervisor
+        },
+        #{
+            id => player_tab,
+            start => {player_tab, start_link, []},
+            restart => permanent,
+            shutdown => 2000,
+            type => worker
         },
         ranch:child_spec(client_acceptor, 100, ranch_tcp, [{port, server_properties:get_server_port()}], client_srv, [])
     ],

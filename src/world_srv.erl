@@ -21,7 +21,7 @@
 
 start_link(WorldName) ->
     logger:info("WorldName: ~p~n", [WorldName]),
-    gen_server:start_link(?MODULE, [WorldName], []).
+    gen_server:start_link({via, registry_srv, {?MODULE, WorldName}}, ?MODULE, [WorldName], []).
 
 %% gen_server.
 

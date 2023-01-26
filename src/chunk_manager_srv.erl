@@ -4,6 +4,7 @@
 -include("chunk.hrl").
 
 %% API.
+-export([tabname/2, get_chunk/2]).
 -export([start_link/2]).
 
 %% gen_server.
@@ -20,15 +21,31 @@
 
 %% API.
 
+tabname(WorldName, Dimension) when is_list(WorldName) andalso is_atom(Dimension) ->
+    list_to_atom(WorldName ++ "#" ++ atom_to_list(Dimension)).
+
+get_chunk(TabName, ChunkCoord = {_X, _Z}) ->
+    Q = fun() ->
+                case mnesia:read(TabName, ChunkCoord) of
+                    [] ->
+                        Chunk = generate_chunk(ChunkCoord),
+                        mnesia:write(TabName, Chunk, write),
+                        Chunk;
+                    [Chunk] -> Chunk
+                end
+        end,
+    {atomic, R} = mnesia:transaction(Q),
+    R.
+
 start_link(WorldName, Dimension) ->
     logger:info("WorldName: ~p, Dimension: ~p~n", [WorldName, Dimension]),
-    gen_server:start_link(?MODULE, [WorldName, Dimension], []).
+    gen_server:start_link({via, registry_srv, {?MODULE, WorldName, Dimension}}, ?MODULE, [WorldName, Dimension], []).
 
 %% gen_server.
 
 init([WorldName, Dimension]) ->
     erlang:process_flag(trap_exit, true),
-    TabName = list_to_atom(WorldName ++ "#" ++ atom_to_list(Dimension)),
+    TabName = tabname(WorldName, Dimension),
     maybe_init_table(TabName),
     {ok, #state{table = TabName}}.
 
@@ -66,29 +83,21 @@ maybe_init_table(TabName) ->
             ok
     end.
 
-get_chunk(ChunkCoord = {_X, _Z}) ->
-    Q = fun() ->
-                case mnesia:read(column, ChunkCoord) of
-                    [] ->
-                        Chunk = generate_chunk(ChunkCoord),
-                        mnesia:write(Chunk),
-                        Chunk;
-                    [Chunk] -> Chunk
-                end
-        end,
-    {atomic, R} = mnesia:transaction(Q),
-    R.
-
 generate_chunk(Pos = {X, Z}) ->
     lager:notice("generated chunk ~p~n", [Pos]),
-    #chunk_data{
-        % full_column=true,
-        layers=[
-            chunk_layer:layer_bedrock(0, blocks:bedrock()),
-            chunk_layer:layer_stone(1, blocks:stone()),
-            chunk_layer:layer_stone(2, blocks:dirt()),
-            chunk_layer:layer_grass(3, blocks:grass()),
-            chunk_layer:layer_air(4)
-        ],
-        biome=binary:copy(<<0>>,256)
+    ChunkData = 
+        #chunk_data{
+            % full_column=true,
+            layers=[
+                chunk_layer:layer(0, blocks:bedrock()),
+                chunk_layer:layer(1, blocks:stone()),
+                chunk_layer:layer(2, blocks:dirt()),
+                chunk_layer:layer(3, blocks:grass()),
+                chunk_layer:layer_air(4)
+            ],
+            biome=binary:copy(<<0>>,256)
+        },
+    #chunk{
+        position = Pos,
+        data = ChunkData
     }.

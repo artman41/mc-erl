@@ -1,9 +1,20 @@
 -module(packets).
 
 -include("packets.hrl").
--include("encryption.hrl").
+-include("cipher_data.hrl").
 
 -export([decode/1, encode/2]).
+-export([apply_cipher/2]).
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+-define(EUNIT_LOG(F, A), ?debugFmt("("++atom_to_list(?FUNCTION_NAME)++") " ++ F, A)).
+-define(EUNIT_LOG(Msg), ?debugMsg("("++atom_to_list(?FUNCTION_NAME)++") " ++ Msg)).
+-else.
+-define(EUNIT_LOG(F, A), ok).
+-define(EUNIT_LOG(Msg), ok).
+-endif.
 
 decode(<<Id:8, Tail/binary>>) ->
     case lists:keyfind(Id, 1, packets()) of
@@ -27,12 +38,29 @@ encode(Type, Args) ->
             {error, {unknown_packet_type, Type}}
     end.
 
-encrypt(#encryption{}, Msg) ->
-    % {Encr, NewIVec} = mc_erl_protocol:encrypt(Socket, Key, IVec, Encoded),
-    ok.
+    
+-spec apply_cipher(Encryption0, Msg) -> {Encryption1, EncryptedData} when
+    Encryption0 :: #cipher_data{}, 
+    Encryption1 :: Encryption0,
+    Msg :: iolist(),
+    EncryptedData :: iolist().
+apply_cipher(Encryption, Msg) when is_record(Encryption, cipher_data) ->
+    apply_cipher_(Encryption, Msg, []).
 
-decrypt() ->
-    ok.
+apply_cipher_(Encryption0 = #cipher_data{ivec = IVec0}, Msg, Acc) -> 
+    ?EUNIT_LOG("Encryption0: ~p~nMsg: ~p~nAcc: ~p~n", [Encryption0, Msg, Acc]),
+    case utils:get_next_char(Msg) of
+        false ->
+            {Encryption0, lists:reverse(Acc)};
+        {Char, RestMsg} ->
+            ?EUNIT_LOG("Char: ~p~nRestMsg: ~p~n", [Char, RestMsg]),
+            Cipher = crypto:crypto_one_time(aes_cfb128, Encryption0#cipher_data.key, IVec0, [Char, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], []),
+            <<Byte:8, _/binary>> = Cipher,
+            ?EUNIT_LOG("Cipher: ~p~nByte: ~p~n", [Cipher, Byte]),
+            Encryption1 = Encryption0#cipher_data{ivec = gen_ivec(IVec0, Byte)},
+            ?EUNIT_LOG("Encryption1: ~p~n", [Encryption1]),
+            apply_cipher_(Encryption1, RestMsg, [Byte | Acc])
+    end.
 
 %% Internal
 
@@ -81,7 +109,7 @@ packets() ->
         {41, entity_effect, [{unknown_1, int32}, {unknown_2, int8}, {unknown_3, int8}, {unknown_4, int16}]},
         {42, remove_entity_effect, [{unknown_1, int32}, {unknown_2, int8}]},
         {43, experience, [{unknown_1, float32}, {unknown_2, int16}, {unknown_3, int16}]},
-        {51, map_chunk, [{unknown_1, int32}, {unknown_2, int32}, {unknown_3, chunk_data}]},
+        {51, map_chunk, [{unknown_1, int32}, {unknown_2, int32}, {unknown_3, '#chunk'}]},
         {52, multi_block_change, [{unknown_1, int32}, {unknown_2, int32}, {unknown_3, multi_block_change_data}]},
         {53, block_change, [{unknown_1, int32}, {unknown_2, int8}, {unknown_3, int32}, {unknown_4, int16}, {unknown_5, int8}]},
         {54, block_action, [{unknown_1, int32}, {unknown_2, int16}, {unknown_3, int32}, {unknown_4, int8}, {unknown_5, int8}, {unknown_6, int16}]},
@@ -167,10 +195,35 @@ encode_([{Name, {array, LenType, DataType}}|Tail], Args, Acc) ->
     end;
 encode_([{Name,Type}|Tail], Args, Acc) ->
     Value = maps:get(Name, Args),
-    lager:debug("Type is ~p~n", [Type]),
+    lager:debug("Name: ~p, Type: ~p, Value: ~p~n", [Name, Type, Value]),
     try packet_encoder:Type(Value) of
         EncodedValue ->
             encode_(Tail, Args, [EncodedValue|Acc])
     catch error:undef ->
         {error, {unknown_type, Type}}
     end.
+
+gen_ivec(<<_:1/binary, IVPart/binary>>, Byte) when 16#00 =< Byte andalso Byte =< 16#FF  ->
+    <<IVPart/binary, Byte>>.
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+-define(ENCRYPTION, #cipher_data{
+    key = <<41,220,25,139,193,47,112,40,188,137,14,233,76,30,189,166>>,
+    ivec = <<41,220,25,139,193,47,112,40,188,137,14,233,76,30,189,166>>
+}).
+
+-define(IO_BYTES(Bytes), iolist_to_binary([if C < 32 -> [$[, integer_to_list(C), $]]; C > 139 -> [$[,integer_to_list(C), $]]; true -> C end || C <- Bytes])).
+
+encryption_test() ->
+    Msg = "This is a test message",
+    {E_Encryption1, EncryptedMsg} = apply_cipher(?ENCRYPTION, Msg),
+    ?debugFmt("Msg: ~p~nEncryptedMsg: ~p~n", [Msg, EncryptedMsg]),
+    {D_Encryption1, DecryptedMsg} = apply_cipher(?ENCRYPTION, EncryptedMsg),
+    ?debugFmt("EncryptedMsg: ~p~nDecryptedMsg: ~p~n", [EncryptedMsg, DecryptedMsg]),
+    ?debugFmt("EncryptedMsg: ~s~nDecryptedMsg: ~s~n", [?IO_BYTES(EncryptedMsg), ?IO_BYTES(DecryptedMsg)]),
+    ?assertEqual(Msg, DecryptedMsg).
+
+-endif.

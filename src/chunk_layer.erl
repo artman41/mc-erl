@@ -21,7 +21,7 @@ layer_air(YPos) when is_integer(YPos) ->
     }.
 
 layer(YPos, #block{id = Id}) ->
-    chunk_manager_srv:set_blocks(layer_air(YPos), {0,0,0}, {16,1,16}, Id).
+    set_blocks(layer_air(YPos), {0,0,0}, {16,1,16}, Id).
 
 %% Internal
 

@@ -13,14 +13,15 @@
 -export([code_change/3]).
 
 -record(state, {
-    chunk_manager_srv :: pid()
+    chunk_manager_srv :: pid(),
+    players :: list(iolist())
 }).
 
 %% API.
 
 start_link(WorldName, Dimension) ->
     logger:info("WorldName: ~p, Dimension: ~p~n", [WorldName, Dimension]),
-    gen_server:start_link(?MODULE, [WorldName, Dimension], []).
+    gen_server:start_link({via, registry_srv, {?MODULE, WorldName, Dimension}}, ?MODULE, [WorldName, Dimension], []).
 
 %% gen_server.
 
@@ -29,7 +30,8 @@ init([WorldName, Dimension]) ->
     {ok, ChunkManagerSrv} = chunk_manager_sup:start_child(WorldName, Dimension),
     link(ChunkManagerSrv),
     {ok, #state{
-        chunk_manager_srv = ChunkManagerSrv
+        chunk_manager_srv = ChunkManagerSrv,
+        players = []
     }}.
 
 handle_call(_Request, _From, State) ->

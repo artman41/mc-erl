@@ -12,6 +12,6 @@
 }).
 
 -record(chunk, {
-    position :: {X :: integer(), Y :: integer()},
+    position :: {X :: integer(), Z :: integer()},
     data :: #chunk_data{}
 }).

@@ -1,4 +1,7 @@
 -module(packet_encoder).
+
+-include("chunk.hrl").
+
 -export([
     uint8/1,
     int8/1,
@@ -9,6 +12,7 @@
     float64/1,
     string/1,
     bool/1,
+    '#chunk'/1,
     chunk_bulk/1,
     slots/1,
     abs_byte/1,
@@ -32,10 +36,14 @@ int32(N) when is_integer(N) andalso N >= -16#80000000 andalso N =< 16#7fffffff -
 int64(N) when is_integer(N) andalso N >= -16#8000000000000000 andalso N =< 16#7fffffffffffffff ->
     <<N:64/signed>>.
 
-float32(F) when is_float(F) andalso -16#80000000 andalso F =< 16#7fffffff ->
+float32(I) when is_integer(I) ->
+    float32(I*1.0);
+float32(F) when is_float(F) andalso F >= -16#80000000 andalso F =< 16#7fffffff ->
     <<F:32/float>>.
 
-float64(F) when is_float(F) andalso -16#8000000000000000 andalso F =< 16#7fffffffffffffff ->
+float64(I) when is_integer(I) ->
+    float64(I*1.0);
+float64(F) when is_float(F) andalso F >= -16#8000000000000000 andalso F =< 16#7fffffffffffffff ->
     <<F:64/float>>.
 
 string(Data) ->
@@ -43,6 +51,32 @@ string(Data) ->
         int16(iolist_size(Data)),
         unicode:characters_to_binary(Data, unicode, utf16)
     ]).
+
+'#chunk'(unload) ->
+    [bool(true), int16(0), int16(0), int32(0)];
+'#chunk'({raw, Bin}) ->
+    [int32(byte_size(Bin)), int32(0), Bin];
+'#chunk'({uncompressed, Uncompressed}) ->
+    Bin = zlib:compress(Uncompressed),
+    [int32(byte_size(Bin)), int32(0), Bin];
+'#chunk'(#chunk{data = Data}) ->
+    Dict = 
+        lists:foldr(fun(#chunk_layer{types = Types, metadata = Metadata, block_light = BlockLight, sky_light = SkyLight}, Acc0) ->
+            Acc1 = dict:append(types, Types, Acc0),
+            Acc2 = dict:append(metadata, Metadata, Acc1),
+            Acc3 = dict:append(block_light, BlockLight, Acc2),
+            Acc4 = dict:append(sky_light, SkyLight, Acc3)
+        end, dict:new(), Data#chunk_data.layers),
+
+    List_Types = dict:fetch(types, Dict),
+    List_Metadata = dict:fetch(metadata, Dict),
+    List_BlockLight = dict:fetch(block_light, Dict),
+    List_SkyLight = dict:fetch(sky_light, Dict),
+    
+    BinData = list_to_binary([List_Types, List_Metadata, List_BlockLight, List_SkyLight, Data#chunk_data.biome]),
+    CompressedData = zlib:compress(BinData),
+
+    [bool(_FullColumn = false), <<16#FF,16#FF>>, <<16#FF,16#FF>>, int32(byte_size(CompressedData)), CompressedData].
 
 bool(true) ->
     <<1:8>>;
@@ -52,8 +86,9 @@ bool(false) ->
 chunk_bulk(<<Packet/binary>>) ->
     erlang:error(not_implemented).
 
-slots(<<Packet/binary>>) ->
-    erlang:error(not_implemented).
+slots(_Packet) ->
+    %%TODO: Properly implement
+    int16(0).
 
 abs_byte(<<Packet/binary>>) ->
     erlang:error(not_implemented).
